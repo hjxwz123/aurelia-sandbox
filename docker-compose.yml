@@ -1,12 +1,12 @@
 # Server deployment for the Aurelia sandbox.
 #
 # Pull-and-run on the server (no build needed — images come from ghcr.io):
-#   export OWNER=your-github-account          # lowercase
+#   export OWNER=hjxwz123
 #   export SANDBOX_API_KEY=$(openssl rand -hex 24)
 #   docker compose pull && docker compose up -d
 #
 # Then point the Go backend at it:
-#   SANDBOX_BASE_URL=http://<server>:8000
+#   SANDBOX_BASE_URL=http://<server>:48217
 #   SANDBOX_API_KEY=<same value as above>
 #
 # The sidecar drives the host Docker daemon (mounted socket) to spawn one
@@ -15,18 +15,24 @@
 
 services:
   sandbox:
-    image: ghcr.io/${OWNER}/aurelia-sandbox-sidecar:latest
+    image: ghcr.io/${OWNER:-hjxwz123}/aurelia-sandbox-sidecar:latest
     restart: unless-stopped
     ports:
       # Host port is an uncommon high port to avoid clashes with other
       # services; the in-container port stays 8000.
       - "48217:8000"
     environment:
-      SANDBOX_IMAGE: ghcr.io/${OWNER}/aurelia-sandbox:latest
+      SANDBOX_IMAGE: ghcr.io/${OWNER:-hjxwz123}/aurelia-sandbox:latest
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_NETWORK: none        # set "bridge" only if code needs runtime internet
       SANDBOX_MEMORY: 2g
       SANDBOX_CPUS: "1"
+      SANDBOX_MAX_SESSIONS: "16"
+      SANDBOX_MAX_CONCURRENT_EXECS: "4"
+      SANDBOX_MAX_CONCURRENT_CREATES: "2"
+      SANDBOX_MAX_UPLOAD_BYTES: "20971520"
+      SANDBOX_MAX_FILES_PER_EXEC: "20"
+      SANDBOX_MAX_TOTAL_ARTIFACT_BYTES: "52428800"
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:-}
     volumes:
       # The sidecar needs the host daemon to spawn sibling session containers.

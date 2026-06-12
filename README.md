@@ -199,13 +199,29 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 | `SANDBOX_API_KEY` | _(empty)_ | when set, require `Authorization: Bearer …` |
 | `SANDBOX_EXEC_TIMEOUT_CAP_MS` | `120000` | hard ceiling per exec (§4.5) |
 | `SANDBOX_IDLE_TTL_SECONDS` | `1800` | idle sessions reaped after 30 min |
+| `SANDBOX_MAX_SESSIONS` | `16` | max active sandbox containers |
+| `SANDBOX_MAX_CONCURRENT_EXECS` | `4` | max concurrent `/exec` calls across sessions |
+| `SANDBOX_MAX_CONCURRENT_CREATES` | `2` | max concurrent Docker container creates |
+| `SANDBOX_QUEUE_TIMEOUT_SECONDS` | `150` | how long a request waits for an internal slot |
+| `SANDBOX_MAX_UPLOAD_BYTES` | `20971520` | max decoded size for one `/files` upload |
+| `SANDBOX_MAX_FILES_PER_EXEC` | `20` | max returned artifacts per `/exec` |
+| `SANDBOX_MAX_TOTAL_ARTIFACT_BYTES` | `52428800` | max total returned artifact bytes per `/exec` |
+| `SANDBOX_READ_ONLY_ROOTFS` | `0` | opt in to read-only rootfs + tmpfs workspace |
+| `SANDBOX_TMPFS_SIZE` | `256m` | tmpfs size for `/tmp` and `/home/sandbox` when read-only mode is on |
+| `SANDBOX_WORKSPACE_TMPFS_SIZE` | `512m` | tmpfs size for `/workspace` when read-only mode is on |
+| `SANDBOX_NOFILE_ULIMIT` | `1024:1024` | per-container open-file ulimit |
 
 ## Security posture (dev-grade)
 
 Each session container runs **non-root**, `--network none`, `--cap-drop ALL`,
-`--security-opt no-new-privileges`, with memory/cpu/pids limits and a 120s exec
-timeout. stdout/stderr are truncated to 32KB and produced files capped at 20MB
-before returning — matching the §4.5 安全基线.
+`--security-opt no-new-privileges`, with memory/cpu/pids/nofile limits and a
+120s exec timeout. `/exec` calls are serialized per session, globally
+rate-limited, and stdout/stderr are streamed through a 32KB cap before
+returning. Produced files are capped at 20MB each, 20 files, and 50MB total per
+exec — matching the §4.5 安全基线 while keeping the HTTP contract unchanged.
+
+On startup the sidecar also discovers existing `aurelia.sandbox=1` containers,
+so a sidecar restart can keep tracking live sessions and reap stale ones later.
 
 This is container-level isolation, fine for a single-host dev box. It is **not**
 gVisor/microVM-grade. For production, replace the `docker run`/`docker exec`
