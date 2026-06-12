@@ -1,0 +1,31 @@
+# Server deployment for the Aurelia sandbox.
+#
+# Pull-and-run on the server (no build needed — images come from ghcr.io):
+#   export OWNER=your-github-account          # lowercase
+#   export SANDBOX_API_KEY=$(openssl rand -hex 24)
+#   docker compose pull && docker compose up -d
+#
+# Then point the Go backend at it:
+#   SANDBOX_BASE_URL=http://<server>:8000
+#   SANDBOX_API_KEY=<same value as above>
+#
+# The sidecar drives the host Docker daemon (mounted socket) to spawn one
+# locked-down `aurelia-sandbox` container per session. SANDBOX_PULL_ON_START
+# makes it fetch the runtime image on boot so the first /sessions call works.
+
+services:
+  sandbox:
+    image: ghcr.io/${OWNER}/aurelia-sandbox-sidecar:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      SANDBOX_IMAGE: ghcr.io/${OWNER}/aurelia-sandbox:latest
+      SANDBOX_PULL_ON_START: "1"
+      SANDBOX_NETWORK: none        # set "bridge" only if code needs runtime internet
+      SANDBOX_MEMORY: 2g
+      SANDBOX_CPUS: "1"
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-}
+    volumes:
+      # The sidecar needs the host daemon to spawn sibling session containers.
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -1,0 +1,4 @@
+# Sidecar deps only (the FastAPI service that drives Docker).
+# The sandbox runtime's own packages live in Dockerfile.runner.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0

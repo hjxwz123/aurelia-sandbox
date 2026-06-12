@@ -1,0 +1,152 @@
+# Aurelia local Python sandbox (sidecar)
+
+A tiny, self-hosted Python execution sandbox for local development. It implements
+the exact 3-endpoint HTTP protocol the Go backend already speaks
+(`server/internal/sandbox/sandbox.go`), so wiring it up is just an env var.
+
+It is **not** a from-scratch sandbox: each session is a locked-down Docker
+container running a pre-baked Python image. `/workspace` persists across `exec`
+calls within a session (like ChatGPT Code Interpreter), and Chinese renders
+correctly because the image ships Noto CJK fonts.
+
+```
+┌────────────┐   POST /sessions /exec /files   ┌──────────────┐   docker exec   ┌──────────────────┐
+│ Go backend │ ──────────────────────────────► │ app.py (this)│ ──────────────► │ session container │
+└────────────┘   SANDBOX_BASE_URL              └──────────────┘                 │  aurelia-sandbox  │
+                                                                                 └──────────────────┘
+```
+
+## What's in the runtime image
+
+- **Data science**: numpy, pandas, scipy, scikit-learn, statsmodels,
+  matplotlib, seaborn, plotly (+ kaleido), pillow, sympy, networkx
+- **Documents (§4.5.1)**: python-pptx, python-docx, openpyxl, xlsxwriter,
+  reportlab, weasyprint (HTML→PDF), markdown, jinja2
+- **Utilities**: pypdf, tabulate, requests, lxml, beautifulsoup4, pyyaml
+- **Fonts**: Noto Sans CJK (SC/TC/JP/KR), Noto Color Emoji, DejaVu — matplotlib
+  is pre-configured to use them, so no more tofu boxes (□□□) for Chinese.
+
+Heavy extras (Playwright/Chromium for HTML screenshots, LibreOffice for format
+conversion) are left commented at the bottom of `Dockerfile.runner` — uncomment
+if you need them; they add ~400–500MB each.
+
+## Deploy: build in the cloud, run on your server (recommended)
+
+No local Docker needed. GitHub Actions builds both images and pushes them to
+GitHub Container Registry; your server just pulls and runs them.
+
+**1. Push the repo to GitHub** (the workflow lives at
+`.github/workflows/sandbox-image.yml`):
+
+```bash
+git init && git add . && git commit -m "sandbox service"
+git branch -M main
+gh repo create aurelia --private --source=. --remote=origin --push
+# or: git remote add origin git@github.com:<you>/aurelia.git && git push -u origin main
+```
+
+The push triggers the build. Watch it under the repo's **Actions** tab; when
+green you'll have:
+
+```
+ghcr.io/<you>/aurelia-sandbox:latest          # the Python runtime
+ghcr.io/<you>/aurelia-sandbox-sidecar:latest  # the control service
+```
+
+> First time, the packages may be private. Make them visible to your server by
+> either keeping them private and `docker login ghcr.io` on the server with a
+> PAT (read:packages), or set the package visibility to public in GitHub.
+
+**2. Run on the server** (needs Docker installed there):
+
+```bash
+cd sandbox-service
+export OWNER=<your-github-account-lowercase>
+export SANDBOX_API_KEY=$(openssl rand -hex 24)
+docker login ghcr.io          # if packages are private
+docker compose pull && docker compose up -d
+curl localhost:8000/healthz   # {"ok":true,...}
+```
+
+**3. Point the Go backend at it:**
+
+```
+SANDBOX_BASE_URL=http://<server-host>:8000
+SANDBOX_API_KEY=<same value you exported above>
+```
+
+That's the whole loop — your local machine never builds or runs Docker.
+
+---
+
+## Optional: run locally (if you have a working Docker engine)
+
+Requires a running Docker engine (Docker Desktop or Colima) and Python 3.10+.
+
+```bash
+cd sandbox-service
+
+# 1. Build the runtime image (one-time, ~5–8 min, downloads the wheels + fonts)
+docker build -f Dockerfile.runner -t aurelia-sandbox:latest .
+
+# 2. Install the sidecar deps and run it on :8000
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --host 127.0.0.1 --port 8000
+```
+
+Then set `SANDBOX_BASE_URL=http://127.0.0.1:8000` for the Go server.
+
+## Smoke test (no backend needed)
+
+```bash
+SID=$(curl -s -XPOST localhost:8000/sessions | python3 -c 'import sys,json;print(json.load(sys.stdin)["session_id"])')
+
+curl -s -XPOST localhost:8000/exec -H 'content-type: application/json' -d "{
+  \"session_id\": \"$SID\",
+  \"code\": \"import matplotlib.pyplot as plt; plt.plot([1,2,3]); plt.title('中文标题'); plt.savefig('/workspace/outputs/p.png'); print('rows', 3)\"
+}" | python3 -m json.tool
+```
+
+You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
+(base64) in `files` — with the Chinese title rendered, not boxes.
+
+## Configuration (env vars)
+
+| Var | Default | Notes |
+|---|---|---|
+| `SANDBOX_IMAGE` | `aurelia-sandbox:latest` | runtime image tag |
+| `SANDBOX_NETWORK` | `none` | set `bridge` to allow `pip install` at runtime |
+| `SANDBOX_MEMORY` | `2g` | per-container memory cap |
+| `SANDBOX_CPUS` | `1` | per-container CPU cap |
+| `SANDBOX_PIDS_LIMIT` | `256` | fork-bomb guard |
+| `SANDBOX_API_KEY` | _(empty)_ | when set, require `Authorization: Bearer …` |
+| `SANDBOX_EXEC_TIMEOUT_CAP_MS` | `120000` | hard ceiling per exec (§4.5) |
+| `SANDBOX_IDLE_TTL_SECONDS` | `1800` | idle sessions reaped after 30 min |
+
+## Security posture (dev-grade)
+
+Each session container runs **non-root**, `--network none`, `--cap-drop ALL`,
+`--security-opt no-new-privileges`, with memory/cpu/pids limits and a 120s exec
+timeout. stdout/stderr are truncated to 32KB and produced files capped at 20MB
+before returning — matching the §4.5 安全基线.
+
+This is container-level isolation, fine for a single-host dev box. It is **not**
+gVisor/microVM-grade. For production, replace the `docker run`/`docker exec`
+calls in `app.py` with a gVisor, Firecracker, or E2B backend — the HTTP contract
+and the Go side stay identical (that's the whole point of the thin adapter).
+
+## Endpoints
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/sessions` | `{}` | `{session_id}` |
+| POST | `/exec` | `{session_id, code, timeout_ms?}` | `{stdout, stderr, exit_code, files[]}` |
+| POST | `/files` | `{session_id, path, data_base64}` | `{ok}` |
+| DELETE | `/sessions/{id}` | — | `{ok}` |
+| GET | `/healthz` | — | `{ok, docker, image}` |
+
+Artifacts in `files[]` are whatever the code wrote under `/workspace/outputs/`
+during that exec (`{name, mime_type, data_base64}`). User uploads should be
+written to `/workspace/uploads/` via `/files` — that's the path the
+`python_execute` tool description tells the model about.

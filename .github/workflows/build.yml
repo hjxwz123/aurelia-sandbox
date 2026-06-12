@@ -1,0 +1,63 @@
+name: Build & push sandbox images
+
+# Self-contained build for the standalone sandbox repo (this folder is the repo
+# root). Builds both images in the cloud and pushes them to GitHub Container
+# Registry — no local Docker needed.
+#
+#   ghcr.io/<your-account>/aurelia-sandbox:latest          # Python runtime
+#   ghcr.io/<your-account>/aurelia-sandbox-sidecar:latest  # control service
+#
+# Trigger: every push to main, or manually via the Actions tab.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  # Server arch. Change to linux/arm64 (and DOCKER_CLI_ARCH=aarch64 in
+  # Dockerfile.sidecar) for ARM servers, or list both for multi-arch.
+  PLATFORMS: linux/amd64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: aurelia-sandbox
+            dockerfile: Dockerfile.runner
+          - name: aurelia-sandbox-sidecar
+            dockerfile: Dockerfile.sidecar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute lowercase owner
+        id: vars
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}:latest
+            ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
