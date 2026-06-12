@@ -30,43 +30,28 @@ Heavy extras (Playwright/Chromium for HTML screenshots, LibreOffice for format
 conversion) are left commented at the bottom of `Dockerfile.runner` — uncomment
 if you need them; they add ~400–500MB each.
 
-## Deploy: build in the cloud, run on your server (recommended)
+## Deploy: pull the public images and run (recommended)
 
-No local Docker needed. GitHub Actions builds both images and pushes them to
-GitHub Container Registry; your server just pulls and runs them.
+This project publishes ready-to-use images to GitHub Container Registry. Users
+do **not** need to build images, create their own GitHub repo, or log in to
+GHCR. The images are public:
 
-**1. Push the repo to GitHub** (the workflow lives at
-`.github/workflows/build.yml`):
+```
+ghcr.io/hjxwz123/aurelia-sandbox:latest          # Python runtime
+ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest  # control service
+```
+
+**1. Clone the public repo on your server**
 
 ```bash
-git init && git add . && git commit -m "sandbox service"
-git branch -M main
-gh repo create aurelia --private --source=. --remote=origin --push
-# or: git remote add origin git@github.com:<you>/aurelia.git && git push -u origin main
+git clone https://github.com/hjxwz123/aurelia-sandbox.git
+cd aurelia-sandbox
 ```
 
-The push triggers the build. Watch it under the repo's **Actions** tab; when
-green you'll have:
-
-```
-ghcr.io/<you>/aurelia-sandbox:latest          # the Python runtime
-ghcr.io/<you>/aurelia-sandbox-sidecar:latest  # the control service
-```
-
-> First time, the packages may be private. Make them visible to your server by
-> either keeping them private and `docker login ghcr.io` on the server with a
-> PAT (read:packages), or set the package visibility to public in GitHub.
-
-**2. Pull the images on the server** (needs Docker installed there):
+**2. Pull the public images**
 
 ```bash
-cd sandbox-service
-export OWNER=<your-github-account-lowercase>
-
-# Only needed when the GHCR packages are private:
-# 1. Create a GitHub PAT with read:packages.
-# 2. Paste that PAT when Docker asks for a password.
-docker login ghcr.io -u "$OWNER"
+export OWNER=hjxwz123
 
 docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
 docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
@@ -96,50 +81,36 @@ curl -H "Authorization: Bearer $SANDBOX_API_KEY" http://localhost:48217/healthz
 
 ```
 SANDBOX_BASE_URL=http://<server-host>:48217
-SANDBOX_API_KEY=<same value you exported above>
+SANDBOX_API_KEY=<same value printed above>
 ```
 
-That's the whole loop — your local machine never builds or runs Docker.
+That's the whole loop. Users pull and run the public images; they do not build
+Docker images.
 
 ---
 
-## 部署：云端构建，服务器拉取运行（推荐）
+## 部署：拉取公开镜像并运行（推荐）
 
-本地不需要 Docker。每次推送到 GitHub 后，GitHub Actions 会构建两个镜像
-并推送到 GitHub Container Registry（GHCR），服务器只负责拉取和运行。
+本项目已经把可直接使用的镜像发布到 GitHub Container Registry。使用者
+不需要构建镜像，不需要创建自己的 GitHub 仓库，也不需要登录 GHCR。镜像
+是公开的：
 
-**1. 推送仓库到 GitHub**（工作流文件在 `.github/workflows/build.yml`）：
+```
+ghcr.io/hjxwz123/aurelia-sandbox:latest          # Python 运行时镜像
+ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest  # 控制服务镜像
+```
+
+**1. 在服务器上克隆公开仓库**
 
 ```bash
-git init && git add . && git commit -m "sandbox service"
-git branch -M main
-gh repo create aurelia --private --source=. --remote=origin --push
-# 或者：
-# git remote add origin git@github.com:<you>/aurelia.git
-# git push -u origin main
+git clone https://github.com/hjxwz123/aurelia-sandbox.git
+cd aurelia-sandbox
 ```
 
-推送后会触发 Actions。到仓库的 **Actions** 页面确认构建成功。成功后会得到：
-
-```
-ghcr.io/<you>/aurelia-sandbox:latest          # Python 运行时镜像
-ghcr.io/<you>/aurelia-sandbox-sidecar:latest  # 控制服务镜像
-```
-
-> 如果 GHCR package 是私有的，服务器需要先登录 GHCR。可以创建一个带
-> `read:packages` 权限的 GitHub PAT；或者在 GitHub Packages 页面把镜像
-> 可见性改成 public。
-
-**2. 在服务器上拉取镜像**（服务器需要已安装 Docker）：
+**2. 拉取公开镜像**
 
 ```bash
-cd sandbox-service
-export OWNER=<你的-github-用户名-小写>
-
-# 仅私有镜像需要执行：
-# 1. 创建一个带 read:packages 权限的 GitHub PAT。
-# 2. Docker 提示输入密码时粘贴这个 PAT。
-docker login ghcr.io -u "$OWNER"
+export OWNER=hjxwz123
 
 docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
 docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
@@ -168,19 +139,21 @@ curl -H "Authorization: Bearer $SANDBOX_API_KEY" http://localhost:48217/healthz
 
 ```
 SANDBOX_BASE_URL=http://<服务器地址>:48217
-SANDBOX_API_KEY=<上一步输出的同一个值>
+SANDBOX_API_KEY=<上一步打印出来的同一个值>
 ```
 
-这样就完成了：本地机器不用构建或运行 Docker。
+这样就完成了。使用者直接拉取并运行公开镜像，不需要构建 Docker 镜像。
 
 ---
 
-## Optional: run locally (if you have a working Docker engine)
+## Optional: build locally for development or customization
 
-Requires a running Docker engine (Docker Desktop or Colima) and Python 3.10+.
+Regular users should use the public images above. This section is only for
+maintainers or developers who want to change the runtime image. It requires a
+running Docker engine (Docker Desktop or Colima) and Python 3.10+.
 
 ```bash
-cd sandbox-service
+cd aurelia-sandbox
 
 # 1. Build the runtime image (one-time, ~5–8 min, downloads the wheels + fonts)
 docker build -f Dockerfile.runner -t aurelia-sandbox:latest .
@@ -196,9 +169,16 @@ Then set `SANDBOX_BASE_URL=http://127.0.0.1:8000` for the Go server.
 ## Smoke test (no backend needed)
 
 ```bash
-SID=$(curl -s -XPOST localhost:8000/sessions | python3 -c 'import sys,json;print(json.load(sys.stdin)["session_id"])')
+export SANDBOX_URL=${SANDBOX_URL:-http://localhost:48217}
 
-curl -s -XPOST localhost:8000/exec -H 'content-type: application/json' -d "{
+SID=$(curl -s -XPOST "$SANDBOX_URL/sessions" \
+  -H "Authorization: Bearer $SANDBOX_API_KEY" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["session_id"])')
+
+curl -s -XPOST "$SANDBOX_URL/exec" \
+  -H "Authorization: Bearer $SANDBOX_API_KEY" \
+  -H 'content-type: application/json' \
+  -d "{
   \"session_id\": \"$SID\",
   \"code\": \"import matplotlib.pyplot as plt; plt.plot([1,2,3]); plt.title('中文标题'); plt.savefig('/workspace/outputs/p.png'); print('rows', 3)\"
 }" | python3 -m json.tool
