@@ -18,7 +18,9 @@ services:
     image: ghcr.io/${OWNER}/aurelia-sandbox-sidecar:latest
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Host port is an uncommon high port to avoid clashes with other
+      # services; the in-container port stays 8000.
+      - "48217:8000"
     environment:
       SANDBOX_IMAGE: ghcr.io/${OWNER}/aurelia-sandbox:latest
       SANDBOX_PULL_ON_START: "1"
