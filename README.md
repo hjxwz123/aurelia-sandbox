@@ -36,7 +36,7 @@ No local Docker needed. GitHub Actions builds both images and pushes them to
 GitHub Container Registry; your server just pulls and runs them.
 
 **1. Push the repo to GitHub** (the workflow lives at
-`.github/workflows/sandbox-image.yml`):
+`.github/workflows/build.yml`):
 
 ```bash
 git init && git add . && git commit -m "sandbox service"
@@ -57,25 +57,121 @@ ghcr.io/<you>/aurelia-sandbox-sidecar:latest  # the control service
 > either keeping them private and `docker login ghcr.io` on the server with a
 > PAT (read:packages), or set the package visibility to public in GitHub.
 
-**2. Run on the server** (needs Docker installed there):
+**2. Pull the images on the server** (needs Docker installed there):
 
 ```bash
 cd sandbox-service
 export OWNER=<your-github-account-lowercase>
+
+# Only needed when the GHCR packages are private:
+# 1. Create a GitHub PAT with read:packages.
+# 2. Paste that PAT when Docker asks for a password.
+docker login ghcr.io -u "$OWNER"
+
+docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
+docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
+docker images "ghcr.io/$OWNER/aurelia-sandbox*"
+```
+
+**3. Generate and display the API key**
+
+```bash
 export SANDBOX_API_KEY=$(openssl rand -hex 24)
-docker login ghcr.io          # if packages are private
-docker compose pull && docker compose up -d
-curl localhost:8000/healthz   # {"ok":true,...}
+printf 'SANDBOX_API_KEY=%s\n' "$SANDBOX_API_KEY"
 ```
 
-**3. Point the Go backend at it:**
+Keep this value. The sidecar requires it for requests, and the Go backend must
+use the same key.
+
+**4. Start the service**
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+curl -H "Authorization: Bearer $SANDBOX_API_KEY" http://localhost:48217/healthz
+```
+
+**5. Point the Go backend at it:**
 
 ```
-SANDBOX_BASE_URL=http://<server-host>:8000
+SANDBOX_BASE_URL=http://<server-host>:48217
 SANDBOX_API_KEY=<same value you exported above>
 ```
 
 That's the whole loop — your local machine never builds or runs Docker.
+
+---
+
+## 部署：云端构建，服务器拉取运行（推荐）
+
+本地不需要 Docker。每次推送到 GitHub 后，GitHub Actions 会构建两个镜像
+并推送到 GitHub Container Registry（GHCR），服务器只负责拉取和运行。
+
+**1. 推送仓库到 GitHub**（工作流文件在 `.github/workflows/build.yml`）：
+
+```bash
+git init && git add . && git commit -m "sandbox service"
+git branch -M main
+gh repo create aurelia --private --source=. --remote=origin --push
+# 或者：
+# git remote add origin git@github.com:<you>/aurelia.git
+# git push -u origin main
+```
+
+推送后会触发 Actions。到仓库的 **Actions** 页面确认构建成功。成功后会得到：
+
+```
+ghcr.io/<you>/aurelia-sandbox:latest          # Python 运行时镜像
+ghcr.io/<you>/aurelia-sandbox-sidecar:latest  # 控制服务镜像
+```
+
+> 如果 GHCR package 是私有的，服务器需要先登录 GHCR。可以创建一个带
+> `read:packages` 权限的 GitHub PAT；或者在 GitHub Packages 页面把镜像
+> 可见性改成 public。
+
+**2. 在服务器上拉取镜像**（服务器需要已安装 Docker）：
+
+```bash
+cd sandbox-service
+export OWNER=<你的-github-用户名-小写>
+
+# 仅私有镜像需要执行：
+# 1. 创建一个带 read:packages 权限的 GitHub PAT。
+# 2. Docker 提示输入密码时粘贴这个 PAT。
+docker login ghcr.io -u "$OWNER"
+
+docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
+docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
+docker images "ghcr.io/$OWNER/aurelia-sandbox*"
+```
+
+**3. 生成并显示密钥**
+
+```bash
+export SANDBOX_API_KEY=$(openssl rand -hex 24)
+printf 'SANDBOX_API_KEY=%s\n' "$SANDBOX_API_KEY"
+```
+
+请保存输出的值。sidecar 会用它校验请求，Go 后端也必须配置同一个密钥。
+
+**4. 启动服务**
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+curl -H "Authorization: Bearer $SANDBOX_API_KEY" http://localhost:48217/healthz
+```
+
+**5. 配置 Go 后端**
+
+```
+SANDBOX_BASE_URL=http://<服务器地址>:48217
+SANDBOX_API_KEY=<上一步输出的同一个值>
+```
+
+这样就完成了：本地机器不用构建或运行 Docker。
 
 ---
 
