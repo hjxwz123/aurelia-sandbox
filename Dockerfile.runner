@@ -44,7 +44,7 @@ RUN pip install --upgrade pip && pip install \
         numpy pandas scipy scikit-learn statsmodels \
         matplotlib seaborn plotly kaleido \
         pillow sympy networkx \
-        openpyxl xlsxwriter pypdf \
+        openpyxl xlsxwriter xlrd pypdf \
         python-pptx python-docx reportlab weasyprint \
         tabulate requests lxml beautifulsoup4 markdown jinja2 pyyaml
 
